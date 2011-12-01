@@ -38,13 +38,18 @@ module NewRelic
           if metric.nil?
             metric = NewRelic::Agent::Instrumentation::MetricFrame.database_metric_name
             if metric.nil?
-              if sql =~ /^(select|update|insert|delete|show)/i
-                # Could not determine the model/operation so let's find a better
-                # metric.  If it doesn't match the regex, it's probably a show
-                # command or some DDL which we'll ignore.
-                metric = "Database/SQL/#{$1.downcase}"
-              else
-                metric = "Database/SQL/other"
+              begin
+                if sql =~ /^(select|update|insert|delete|show)/i
+                  # Could not determine the model/operation so let's find a better
+                  # metric.  If it doesn't match the regex, it's probably a show
+                  # command or some DDL which we'll ignore.
+                  metric = "Database/SQL/#{$1.downcase}"
+                else
+                  metric = "Database/SQL/other"
+                end
+              rescue ArgumentError
+                Rails.logger.error "NewRelic choked on this: #{sql}"
+                raise
               end
             end
           end
@@ -58,8 +63,8 @@ module NewRelic
               type = NewRelic::Agent::Database.config[:adapter].sub(/\d*/, '')
               host = NewRelic::Agent::Database.config[:host] || 'localhost'
               metrics << "RemoteService/sql/#{type}/#{host}"
-            end            
-            
+            end
+
             self.class.trace_execution_scoped(metrics) do
               sql, name, binds = args
               t0 = Time.now
@@ -82,7 +87,7 @@ end
 
 DependencyDetection.defer do
   @name = :rails3_active_record
-  
+
   depends_on do
     defined?(ActiveRecord) && defined?(ActiveRecord::Base)
   end
@@ -98,11 +103,11 @@ DependencyDetection.defer do
   depends_on do
     !NewRelic::Control.instance['disable_activerecord_instrumentation']
   end
-  
+
   executes do
     NewRelic::Agent.logger.debug 'Installing Rails 3 ActiveRecord instrumentation'
   end
-  
+
   executes do
     Rails.configuration.after_initialize do
       ActiveRecord::ConnectionAdapters::AbstractAdapter.module_eval do
